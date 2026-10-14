@@ -1,0 +1,585 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": []
+    },
+    "kernelspec": {
+      "name": "python3",
+      "display_name": "Python 3"
+    },
+    "language_info": {
+      "name": "python"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "id": "U4PHoA5KZvO0"
+      },
+      "outputs": [],
+      "source": [
+        "!pip install -q fastapi uvicorn scikit-learn pandas numpy joblib"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import numpy as np\n",
+        "import pandas as pd\n",
+        "import joblib\n",
+        "\n",
+        "from sklearn.ensemble import RandomForestClassifier\n",
+        "from sklearn.model_selection import train_test_split\n",
+        "from sklearn.metrics import accuracy_score, classification_report\n",
+        "\n",
+        "# Reproducible demonstration dataset\n",
+        "rng = np.random.default_rng(42)\n",
+        "\n",
+        "n = 5000\n",
+        "age = rng.integers(18, 71, size=n)\n",
+        "income = rng.integers(10000, 150001, size=n)\n",
+        "\n",
+        "# Synthetic labels for demonstrating the application only\n",
+        "eligible = ((age >= 21) & (income >= 30000)).astype(int)\n",
+        "\n",
+        "df = pd.DataFrame({\n",
+        "    \"age\": age,\n",
+        "    \"income\": income,\n",
+        "    \"eligible\": eligible\n",
+        "})\n",
+        "\n",
+        "X = df[[\"age\", \"income\"]]\n",
+        "y = df[\"eligible\"]\n",
+        "\n",
+        "X_train, X_test, y_train, y_test = train_test_split(\n",
+        "    X, y,\n",
+        "    test_size=0.2,\n",
+        "    random_state=42,\n",
+        "    stratify=y\n",
+        ")\n",
+        "\n",
+        "model = RandomForestClassifier(\n",
+        "    n_estimators=150,\n",
+        "    max_depth=8,\n",
+        "    random_state=42\n",
+        ")\n",
+        "\n",
+        "model.fit(X_train, y_train)\n",
+        "\n",
+        "predictions = model.predict(X_test)\n",
+        "\n",
+        "print(\"Test accuracy:\", round(accuracy_score(y_test, predictions) * 100, 2), \"%\")\n",
+        "print(classification_report(y_test, predictions))\n",
+        "\n",
+        "# Save the trained model\n",
+        "joblib.dump(model, \"/content/model.pkl\")\n",
+        "\n",
+        "print(\"Saved model to /content/model.pkl\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "Qg79BzVYaGGz",
+        "outputId": "73ede40b-0c48-4f04-d682-1c75b4d92165"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Test accuracy: 100.0 %\n",
+            "              precision    recall  f1-score   support\n",
+            "\n",
+            "           0       1.00      1.00      1.00       187\n",
+            "           1       1.00      1.00      1.00       813\n",
+            "\n",
+            "    accuracy                           1.00      1000\n",
+            "   macro avg       1.00      1.00      1.00      1000\n",
+            "weighted avg       1.00      1.00      1.00      1000\n",
+            "\n",
+            "Saved model to /content/model.pkl\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "\n",
+        "print(os.path.exists(\"/content/model.pkl\"))"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "0j2hQFXMaYy5",
+        "outputId": "ba507182-e208-4b61-8036-46e3d7f495ef"
+      },
+      "execution_count": 3,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "True\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "%%writefile /content/app.py\n",
+        "\n",
+        "import os\n",
+        "import joblib\n",
+        "import pandas as pd\n",
+        "\n",
+        "from fastapi import FastAPI, HTTPException\n",
+        "from fastapi.responses import FileResponse\n",
+        "from fastapi.staticfiles import StaticFiles\n",
+        "from pydantic import BaseModel, Field\n",
+        "\n",
+        "BASE_DIR = os.path.dirname(os.path.abspath(__file__))\n",
+        "\n",
+        "model = joblib.load(os.path.join(BASE_DIR, \"model.pkl\"))\n",
+        "\n",
+        "app = FastAPI(\n",
+        "    title=\"Loan Eligibility AI\",\n",
+        "    description=\"Demonstration ML application using FastAPI\",\n",
+        "    version=\"1.0\"\n",
+        ")\n",
+        "\n",
+        "app.mount(\n",
+        "    \"/static\",\n",
+        "    StaticFiles(directory=BASE_DIR),\n",
+        "    name=\"static\"\n",
+        ")\n",
+        "\n",
+        "\n",
+        "class Applicant(BaseModel):\n",
+        "    age: int = Field(..., ge=18, le=100)\n",
+        "    income: float = Field(..., gt=0, le=1_000_000_000)\n",
+        "\n",
+        "\n",
+        "@app.get(\"/\")\n",
+        "def home():\n",
+        "    return FileResponse(\n",
+        "        os.path.join(BASE_DIR, \"index.html\")\n",
+        "    )\n",
+        "\n",
+        "\n",
+        "@app.get(\"/health\")\n",
+        "def health():\n",
+        "    return {\"status\": \"running\", \"model_loaded\": True}\n",
+        "\n",
+        "\n",
+        "@app.post(\"/predict\")\n",
+        "def predict(applicant: Applicant):\n",
+        "    try:\n",
+        "        data = pd.DataFrame(\n",
+        "            [[applicant.age, applicant.income]],\n",
+        "            columns=[\"age\", \"income\"]\n",
+        "        )\n",
+        "\n",
+        "        prediction = int(model.predict(data)[0])\n",
+        "\n",
+        "        probabilities = model.predict_proba(data)[0]\n",
+        "        confidence = float(max(probabilities) * 100)\n",
+        "\n",
+        "        result = \"YES\" if prediction == 1 else \"NO\"\n",
+        "\n",
+        "        return {\n",
+        "            \"prediction\": result,\n",
+        "            \"confidence\": round(confidence, 2),\n",
+        "            \"message\": (\n",
+        "                \"Eligible under the demonstration model\"\n",
+        "                if prediction == 1\n",
+        "                else \"Not eligible under the demonstration model\"\n",
+        "            ),\n",
+        "            \"disclaimer\": (\n",
+        "                \"Demo prediction only; not a real lending decision.\"\n",
+        "            )\n",
+        "        }\n",
+        "\n",
+        "    except Exception as exc:\n",
+        "        raise HTTPException(\n",
+        "            status_code=500,\n",
+        "            detail=f\"Prediction failed: {str(exc)}\"\n",
+        "        )"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "Nv8RK0Z1aeya",
+        "outputId": "a193ee85-4845-4b84-a9a0-0b44a3529969"
+      },
+      "execution_count": 4,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Writing /content/app.py\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "\n",
+        "%%writefile /content/index.html\n",
+        "<!DOCTYPE html>\n",
+        "<html lang=\"en\">\n",
+        "<head>\n",
+        "    <meta charset=\"UTF-8\">\n",
+        "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n",
+        "    <title>Loan Eligibility AI</title>\n",
+        "\n",
+        "    <style>\n",
+        "        * {\n",
+        "            box-sizing: border-box;\n",
+        "        }\n",
+        "\n",
+        "        body {\n",
+        "            margin: 0;\n",
+        "            min-height: 100vh;\n",
+        "            display: grid;\n",
+        "            place-items: center;\n",
+        "            padding: 24px;\n",
+        "            font-family: Arial, sans-serif;\n",
+        "            background: linear-gradient(135deg, #e0e7ff, #f5f3ff);\n",
+        "            color: #1f2937;\n",
+        "        }\n",
+        "\n",
+        "        .card {\n",
+        "            width: 100%;\n",
+        "            max-width: 460px;\n",
+        "            background: white;\n",
+        "            padding: 32px;\n",
+        "            border-radius: 20px;\n",
+        "            box-shadow: 0 16px 45px rgba(31, 41, 55, 0.12);\n",
+        "        }\n",
+        "\n",
+        "        h1 {\n",
+        "            text-align: center;\n",
+        "            margin-bottom: 8px;\n",
+        "            color: #4338ca;\n",
+        "        }\n",
+        "\n",
+        "        .subtitle {\n",
+        "            text-align: center;\n",
+        "            color: #6b7280;\n",
+        "            margin-bottom: 28px;\n",
+        "        }\n",
+        "\n",
+        "        label {\n",
+        "            display: block;\n",
+        "            margin: 18px 0 8px;\n",
+        "            font-weight: bold;\n",
+        "        }\n",
+        "\n",
+        "        input {\n",
+        "            width: 100%;\n",
+        "            padding: 13px;\n",
+        "            border: 1px solid #d1d5db;\n",
+        "            border-radius: 9px;\n",
+        "            font-size: 16px;\n",
+        "        }\n",
+        "\n",
+        "        input:focus {\n",
+        "            outline: 2px solid #818cf8;\n",
+        "            border-color: #6366f1;\n",
+        "        }\n",
+        "\n",
+        "        button {\n",
+        "            width: 100%;\n",
+        "            margin-top: 24px;\n",
+        "            padding: 14px;\n",
+        "            background: #4f46e5;\n",
+        "            color: white;\n",
+        "            border: none;\n",
+        "            border-radius: 9px;\n",
+        "            font-size: 16px;\n",
+        "            font-weight: bold;\n",
+        "            cursor: pointer;\n",
+        "        }\n",
+        "\n",
+        "        button:hover {\n",
+        "            background: #3730a3;\n",
+        "        }\n",
+        "\n",
+        "        button:disabled {\n",
+        "            opacity: 0.6;\n",
+        "            cursor: wait;\n",
+        "        }\n",
+        "\n",
+        "        #result {\n",
+        "            display: none;\n",
+        "            margin-top: 22px;\n",
+        "            padding: 18px;\n",
+        "            border-radius: 10px;\n",
+        "            background: #f3f4f6;\n",
+        "            text-align: center;\n",
+        "            overflow-wrap: anywhere;\n",
+        "        }\n",
+        "\n",
+        "        #result h2 {\n",
+        "            margin: 0 0 10px;\n",
+        "        }\n",
+        "\n",
+        "        .note {\n",
+        "            font-size: 12px;\n",
+        "            color: #6b7280;\n",
+        "            line-height: 1.5;\n",
+        "            margin-top: 22px;\n",
+        "        }\n",
+        "    </style>\n",
+        "</head>\n",
+        "\n",
+        "<body>\n",
+        "    <main class=\"card\">\n",
+        "        <h1>Loan Eligibility AI</h1>\n",
+        "        <p class=\"subtitle\">Enter applicant details to get a demo prediction.</p>\n",
+        "\n",
+        "        <form id=\"loanForm\">\n",
+        "            <label for=\"age\">Age (years)</label>\n",
+        "            <input\n",
+        "                id=\"age\"\n",
+        "                type=\"number\"\n",
+        "                min=\"18\"\n",
+        "                max=\"100\"\n",
+        "                placeholder=\"e.g. 28\"\n",
+        "                required\n",
+        "            >\n",
+        "\n",
+        "            <label for=\"income\">Annual income (₹)</label>\n",
+        "            <input\n",
+        "                id=\"income\"\n",
+        "                type=\"number\"\n",
+        "                min=\"1\"\n",
+        "                step=\"any\"\n",
+        "                placeholder=\"e.g. 600000\"\n",
+        "                required\n",
+        "            >\n",
+        "\n",
+        "            <button id=\"submitButton\" type=\"submit\">\n",
+        "                Check Eligibility\n",
+        "            </button>\n",
+        "        </form>\n",
+        "\n",
+        "        <section id=\"result\" aria-live=\"polite\">\n",
+        "            <h2 id=\"prediction\"></h2>\n",
+        "            <p id=\"details\"></p>\n",
+        "        </section>\n",
+        "\n",
+        "        <p class=\"note\">\n",
+        "            Educational demonstration only. The synthetic model is not\n",
+        "            suitable for actual lending decisions.\n",
+        "        </p>\n",
+        "    </main>\n",
+        "\n",
+        "    <script>\n",
+        "        const form = document.getElementById(\"loanForm\");\n",
+        "        const button = document.getElementById(\"submitButton\");\n",
+        "        const resultBox = document.getElementById(\"result\");\n",
+        "\n",
+        "        form.addEventListener(\"submit\", async (event) => {\n",
+        "            event.preventDefault();\n",
+        "\n",
+        "            button.disabled = true;\n",
+        "            button.textContent = \"Checking...\";\n",
+        "            resultBox.style.display = \"block\";\n",
+        "\n",
+        "            document.getElementById(\"prediction\").textContent =\n",
+        "                \"Processing...\";\n",
+        "            document.getElementById(\"details\").textContent = \"\";\n",
+        "\n",
+        "            try {\n",
+        "                const response = await fetch(\"/predict\", {\n",
+        "                    method: \"POST\",\n",
+        "                    headers: {\n",
+        "                        \"Content-Type\": \"application/json\"\n",
+        "                    },\n",
+        "                    body: JSON.stringify({\n",
+        "                        age: Number(document.getElementById(\"age\").value),\n",
+        "                        income: Number(document.getElementById(\"income\").value)\n",
+        "                    })\n",
+        "                });\n",
+        "\n",
+        "                const data = await response.json();\n",
+        "\n",
+        "                if (!response.ok) {\n",
+        "                    throw new Error(data.detail || \"Request failed\");\n",
+        "                }\n",
+        "\n",
+        "                document.getElementById(\"prediction\").textContent =\n",
+        "                    \"Result: \" + data.prediction;\n",
+        "\n",
+        "                document.getElementById(\"details\").textContent =\n",
+        "                    data.message + \" | Model confidence: \" +\n",
+        "                    data.confidence + \"%\";\n",
+        "\n",
+        "            } catch (error) {\n",
+        "                document.getElementById(\"prediction\").textContent =\n",
+        "                    \"Unable to predict\";\n",
+        "                document.getElementById(\"details\").textContent =\n",
+        "                    error.message;\n",
+        "            } finally {\n",
+        "                button.disabled = false;\n",
+        "                button.textContent = \"Check Eligibility\";\n",
+        "            }\n",
+        "        });\n",
+        "    </script>\n",
+        "</body>\n",
+        "</html>"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "vpziowWvanxm",
+        "outputId": "3dfa5ebf-cc6a-48e0-a89f-9ad8dafe48fd"
+      },
+      "execution_count": 5,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Writing /content/index.html\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import subprocess\n",
+        "import time\n",
+        "import requests\n",
+        "import os\n",
+        "\n",
+        "# Stop a previous server started in this notebook, if present.\n",
+        "if \"server_process\" in globals() and server_process.poll() is None:\n",
+        "    server_process.terminate()\n",
+        "    server_process.wait()\n",
+        "\n",
+        "server_process = subprocess.Popen(\n",
+        "    [\n",
+        "        \"python\", \"-m\", \"uvicorn\",\n",
+        "        \"app:app\",\n",
+        "        \"--app-dir\", \"/content\",\n",
+        "        \"--host\", \"0.0.0.0\",\n",
+        "        \"--port\", \"8000\"\n",
+        "    ],\n",
+        "    cwd=\"/content\",\n",
+        "    stdout=open(\"/content/uvicorn.log\", \"w\"),\n",
+        "    stderr=subprocess.STDOUT\n",
+        ")\n",
+        "\n",
+        "for attempt in range(20):\n",
+        "    try:\n",
+        "        response = requests.get(\n",
+        "            \"http://127.0.0.1:8000/health\",\n",
+        "            timeout=2\n",
+        "        )\n",
+        "        if response.ok:\n",
+        "            print(\"FastAPI started successfully!\")\n",
+        "            print(response.json())\n",
+        "            break\n",
+        "    except requests.RequestException:\n",
+        "        time.sleep(1)\n",
+        "else:\n",
+        "    print(open(\"/content/uvicorn.log\").read())"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "DK8lFrG5bJaz",
+        "outputId": "722a29ac-8ee4-459e-988a-8ecfc43714cf"
+      },
+      "execution_count": 6,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "FastAPI started successfully!\n",
+            "{'status': 'running', 'model_loaded': True}\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "from google.colab.output import eval_js\n",
+        "\n",
+        "app_url = eval_js(\"google.colab.kernel.proxyPort(8000)\")\n",
+        "\n",
+        "print(\"Application URL:\", app_url)\n",
+        "print(\"FastAPI Swagger:\", app_url.rstrip(\"/\") + \"/docs\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 52
+        },
+        "id": "630_mR2ZbUD-",
+        "outputId": "b38436ce-ce09-4a54-a38f-57d0b817b98f"
+      },
+      "execution_count": 7,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "Application URL: https://8000-m-s-kkb-use1b1-t5ubzqtn5pp3-b.us-east1-1.prod.colab.dev\n",
+            "FastAPI Swagger: https://8000-m-s-kkb-use1b1-t5ubzqtn5pp3-b.us-east1-1.prod.colab.dev/docs\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "\n",
+        "for filename in [\"model.pkl\", \"app.py\", \"index.html\"]:\n",
+        "    path = f\"/content/{filename}\"\n",
+        "    print(filename, \"EXISTS\" if os.path.exists(path) else \"MISSING\")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "QmJkjsAgbvDG",
+        "outputId": "21a93d98-c30b-465a-c527-fe0ece5c318d"
+      },
+      "execution_count": 8,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "model.pkl EXISTS\n",
+            "app.py EXISTS\n",
+            "index.html EXISTS\n"
+          ]
+        }
+      ]
+    }
+  ]
+}
